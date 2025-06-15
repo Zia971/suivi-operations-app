@@ -1,3 +1,4 @@
+
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -117,16 +118,13 @@ def main():
 
     with tab_accueil:
         st.header("Tableau de bord")
-
         col1, col2, col3 = st.columns(3)
         with col1:
             operations_totales = len(gestionnaire.operations)
             st.metric("Opérations totales", operations_totales)
-
         with col2:
             avancement_moyen = sum(op["avancement"] for op in gestionnaire.operations.values()) / operations_totales if operations_totales > 0 else 0
             st.metric("Avancement moyen", f"{avancement_moyen:.1f}%")
-
         with col3:
             operations_en_cours = sum(1 for op in gestionnaire.operations.values() if op["statut"] == "en_cours")
             st.metric("En cours", operations_en_cours)
@@ -135,10 +133,9 @@ def main():
         cols = st.columns([2, 2, 2, 2, 2, 2])
         for i, op in gestionnaire.operations.items():
             with cols[i % 6]:
-                st.markdown(f"### {op['nom']}")
-                st.write(f"• Type: {op['type']}  
-• Statut: {STATUSES[op['statut']]}  
-• Avancement: {op['avancement']}%")
+                st.write(f'• Type: {op["type"]}')
+                st.write(f'• Statut: {STATUSES[op["statut"]]}')
+                st.write(f'• Avancement: {op["avancement"]}%')
 
     with tab_operations:
         st.header("Gestion des opérations")
@@ -147,7 +144,6 @@ def main():
             nom = st.text_input("Nom de l'opération")
             type_op = st.selectbox("Type", TYPES_OPERATION)
             charge = st.text_input("Chargé d'opération")
-
             if st.form_submit_button("Créer"):
                 gestionnaire.ajouter_operation(nom, type_op, charge, PHASES)
                 st.success("Opération créée avec succès !")
@@ -155,26 +151,22 @@ def main():
     with tab_detail:
         st.header("Détails de l'opération")
         id_op = st.number_input("ID de l'opération", min_value=1, value=1)
-
         if id_op in gestionnaire.operations:
             operation = gestionnaire.operations[id_op]
             st.header(operation["nom"])
             col1, col2 = st.columns(2)
             with col1:
-                st.write(f"Type: {operation['type']}")
-                st.write(f"Chargé: {operation['charge']}")
+                st.write(f'Type: {operation["type"]}')
+                st.write(f'Chargé: {operation["charge"]}')
             with col2:
-                st.write(f"Statut: {STATUSES[operation['statut']]}")
-                st.write(f"Avancement: {operation['avancement']}%")
-
+                st.write(f'Statut: {STATUSES[operation["statut"]]}')
+                st.write(f'Avancement: {operation["avancement"]}%')
             st.header("Planning")
             fig = creer_gantt(id_op, operation)
             st.plotly_chart(fig, use_container_width=True)
-
             st.header("Journal")
             for entree in reversed(operation["journal"][:10]):
                 st.write(f"[{entree['date']}] {entree['entree']}")
-
             with st.form("nouveau_journal"):
                 entree = st.text_area("Nouvelle entrée journal")
                 if st.form_submit_button("Ajouter à la journal"):
