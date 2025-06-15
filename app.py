@@ -9,17 +9,19 @@ from io import BytesIO
 from docx import Document
 import base64
 
+@st.cache_resource
+def get_connection():
+    return sqlite3.connect("operations.db", check_same_thread=False)
+
 st.set_page_config(page_title="Suivi des Opérations", layout="wide")
 
 DB_FILE = "operations.db"
 
 # Connexion et initialisation
 @st.cache_resource
-def get_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     return conn
 
-conn = get_connection()
 cursor = conn.cursor()
 
 def init_db():
