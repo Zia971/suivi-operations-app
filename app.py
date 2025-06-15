@@ -19,6 +19,7 @@ def get_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     return conn
 
+conn = get_connection()
 cursor = conn.cursor()
 
 def init_db():
