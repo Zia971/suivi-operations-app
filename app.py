@@ -1,305 +1,177 @@
 
+# app.py
 import streamlit as st
 import sqlite3
-import json
+import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import pandas as pd
-from typing import List, Dict
-import os
-import base64
 from io import BytesIO
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
+from docx import Document
+import base64
 
-# Configuration initiale
-st.set_page_config(page_title="Suivi Opérations Construction", layout="wide")
+st.set_page_config(page_title="Suivi des Opérations", layout="wide")
 
-# Connexion à la base de données
-@st.cache_data(ttl=600)
+DB_FILE = "operations.db"
+
+# Connexion et initialisation
+@st.cache_resource
 def get_connection():
-    return sqlite3.connect('construction.db')
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    return conn
 
-# Création des tables si elles n'existent pas
-def init_database():
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Table des opérations
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS operations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom TEXT NOT NULL,
-            type_operation TEXT NOT NULL,
-            responsable TEXT NOT NULL,
-            statut TEXT DEFAULT 'À l\'étude',
-            date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            avancement REAL DEFAULT 0
-        )
-    ''')
-    
-    # Table des phases
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS phases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operation_id INTEGER,
-            phase TEXT NOT NULL,
-            date_debut DATE,
-            date_fin DATE,
-            terminee BOOLEAN DEFAULT 0,
-            FOREIGN KEY (operation_id) REFERENCES operations(id)
-        )
-    ''')
-    
-    # Table du journal
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS journal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operation_id INTEGER,
-            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            evenement TEXT NOT NULL,
-            utilisateur TEXT NOT NULL,
-            FOREIGN KEY (operation_id) REFERENCES operations(id)
-        )
-    ''')
-    
-    # Table des pièces jointes
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pieces_jointes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operation_id INTEGER,
-            nom TEXT NOT NULL,
-            contenu BLOB NOT NULL,
-            date_ajout TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (operation_id) REFERENCES operations(id)
-        )
-    ''')
-    
+conn = get_connection()
+cursor = conn.cursor()
+
+def init_db():
+    cursor.execute('''CREATE TABLE IF NOT EXISTS operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom TEXT, type TEXT, responsable TEXT, statut TEXT,
+        avancement REAL DEFAULT 0, phases TEXT, date_creation TEXT
+    )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_id INTEGER, action TEXT, auteur TEXT, date TEXT
+    )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS pieces_jointes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_id INTEGER, nom TEXT, data_base64 TEXT
+    )''')
     conn.commit()
 
-# Liste des phases possibles
+init_db()
+
 PHASES = [
-    'Phase de montage',
-    'Programmation',
-    'Foncier',
-    'Études',
-    'DCE',
-    'Attribution de marché',
-    'Chantier',
-    'Livraison',
-    'Clôture technique',
-    'Clôture financière'
+    "Phase de montage", "Programmation", "Foncier", "Études",
+    "DCE", "Attribution de marché", "Chantier", "Livraison",
+    "Clôture technique", "Clôture financière"
 ]
+STATUTS = ["🟡 À l’étude", "🟢 En cours", "🔴 Bloqué", "✅ Clôturé"]
 
-# Liste des statuts possibles
-STATUTS = [
-    '🟡 À l\'étude',
-    '🟢 En cours',
-    '🔴 Bloqué',
-    '✅ Clôturé'
-]
+# Fonctions utilitaires
+def ajouter_operation(nom, type_op, responsable, statut):
+    date = datetime.now().isoformat()
+    cursor.execute("INSERT INTO operations (nom, type, responsable, statut, phases, date_creation) VALUES (?, ?, ?, ?, ?, ?)",
+                   (nom, type_op, responsable, statut, "[]", date))
+    conn.commit()
 
-def ajouter_operation():
-    with st.form("nouvelle_operation"):
-        st.header("Nouvelle Opération")
-        nom = st.text_input("Nom de l'opération")
-        type_op = st.selectbox("Type d'opération", ["OPP", "VEFA", "AMO", "Mandat"])
+def get_operations(filtres=None):
+    df = pd.read_sql("SELECT * FROM operations", conn)
+    return df
+
+def get_journal(operation_id):
+    return pd.read_sql(f"SELECT * FROM journal WHERE operation_id={operation_id} ORDER BY date DESC", conn)
+
+def get_pieces(operation_id):
+    return pd.read_sql(f"SELECT * FROM pieces_jointes WHERE operation_id={operation_id}", conn)
+
+# --- Interface
+menu = st.sidebar.radio("📂 Navigation", ["Vue Opérations", "Vue Détails", "Vue Manager", "🔄 Réinitialiser DB"])
+
+# --- Vue Opérations ---
+if menu == "Vue Opérations":
+    st.title("📋 Suivi des opérations")
+    with st.expander("➕ Nouvelle opération"):
+        nom = st.text_input("Nom")
+        type_op = st.selectbox("Type", ["OPP", "VEFA", "AMO", "Mandat"])
         responsable = st.text_input("Responsable")
-        
-        if st.form_submit_button("Enregistrer"):
-            conn = get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT INTO operations (nom, type_operation, responsable)
-                VALUES (?, ?, ?)
-            """, (nom, type_op, responsable))
-            
-            operation_id = cursor.lastrowid
-            
-            for phase in PHASES:
-                cursor.execute("""
-                    INSERT INTO phases (operation_id, phase)
-                    VALUES (?, ?)
-                """, (operation_id, phase))
-            
-            cursor.execute("""
-                INSERT INTO journal (operation_id, evenement, utilisateur)
-                VALUES (?, ?, ?)
-            """, (operation_id, f"Création de l'opération {nom}", st.session_state.utilisateur))
-            
+        statut = st.selectbox("Statut", STATUTS)
+        if st.button("Ajouter"):
+            ajouter_operation(nom, type_op, responsable, statut)
+            st.success("Opération ajoutée")
+
+    st.subheader("🔍 Liste et filtres")
+    df = get_operations()
+    col1, col2, col3 = st.columns(3)
+    f_type = col1.selectbox("Filtrer Type", ["Tous"] + df["type"].unique().tolist())
+    f_statut = col2.selectbox("Filtrer Statut", ["Tous"] + STATUTS)
+    f_resp = col3.selectbox("Filtrer Responsable", ["Tous"] + df["responsable"].unique().tolist())
+
+    if f_type != "Tous":
+        df = df[df["type"] == f_type]
+    if f_statut != "Tous":
+        df = df[df["statut"] == f_statut]
+    if f_resp != "Tous":
+        df = df[df["responsable"] == f_resp]
+
+    st.dataframe(df)
+
+# --- Vue Détails ---
+elif menu == "Vue Détails":
+    st.title("📁 Détail d'une opération")
+    df = get_operations()
+    op_nom = st.selectbox("Choisir une opération", df["nom"] if not df.empty else [])
+    if op_nom:
+        op = df[df["nom"] == op_nom].iloc[0]
+        st.markdown(f"### 🔎 {op_nom}")
+        st.write(f"**Type :** {op['type']}")
+        st.write(f"**Responsable :** {op['responsable']}")
+        st.write(f"**Statut :** {op['statut']}")
+        st.write(f"**Créée le :** {op['date_creation'][:10]}")
+
+        st.subheader("📌 Phases & Avancement")
+        phase_check = st.multiselect("Cochez les phases terminées :", PHASES)
+        avancement = round(len(phase_check) / len(PHASES) * 100, 1)
+        st.progress(avancement / 100)
+        st.write(f"**Avancement :** {avancement} %")
+
+        st.subheader("🗒️ Journal des actions")
+        action = st.text_input("Nouvelle entrée")
+        auteur = st.text_input("Auteur", value="Système")
+        if st.button("Ajouter au journal"):
+            cursor.execute("INSERT INTO journal (operation_id, action, auteur, date) VALUES (?, ?, ?, ?)",
+                           (op["id"], action, auteur, datetime.now().isoformat()))
             conn.commit()
-            st.success("Opération créée avec succès!")
+            st.success("Ajouté")
+        st.dataframe(get_journal(op["id"]))
 
-def afficher_tableau_bord():
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        conn = get_connection()
-        total_ops = pd.read_sql_query(
-            "SELECT COUNT(*) FROM operations",
-            conn
-        ).iloc[0,0]
-        st.metric("Total Opérations", total_ops)
-    
-    with col2:
-        active_ops = pd.read_sql_query("""
-            SELECT COUNT(*) FROM operations 
-            WHERE statut != '✅ Clôturé'
-        """, conn).iloc[0,0]
-        st.metric("Opérations Actives", active_ops)
-    
-    with col3:
-        avg_avancement = pd.read_sql_query("""
-            SELECT AVG(avancement) * 100 FROM operations
-        """, conn).iloc[0,0]
-        st.metric("Avancement Moyen (%)", f"{avg_avancement:.1f}")
-    
-    # Graphique des statuts
-    df_statuts = pd.read_sql_query("""
-        SELECT statut, COUNT(*) as count 
-        FROM operations 
-        GROUP BY statut
-    """, conn)
-    
-    fig = px.pie(df_statuts, values='count', names='statut')
-    st.plotly_chart(fig, use_container_width=True)
-
-def afficher_detail_operation(operation_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    op_data = pd.read_sql_query("""
-        SELECT * FROM operations WHERE id = ?
-    """, conn, params=(operation_id,)).iloc[0]
-    
-    # Affichage des informations générales
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.title(op_data['nom'])
-    with col2:
-        st.write(f"Type: {op_data['type_operation']}")
-        st.write(f"Responsable: {op_data['responsable']}")
-        st.write(f"Statut: {op_data['statut']}")
-        st.write(f"Avancement: {op_data['avancement']*100:.1f}%")
-    
-    # Journal des actions
-    st.subheader("Journal des Actions")
-    df_journal = pd.read_sql_query("""
-        SELECT date, evenement, utilisateur 
-        FROM journal 
-        WHERE operation_id = ?
-        ORDER BY date DESC
-        LIMIT 10
-    """, conn, params=(operation_id,))
-    
-    if not df_journal.empty:
-        st.dataframe(df_journal)
-    
-    # Ajout d'une nouvelle entrée de journal
-    with st.form("nouveau_journal"):
-        evenement = st.text_area("Nouvelle entrée")
-        if st.form_submit_button("Ajouter à l'historique"):
-            cursor.execute("""
-                INSERT INTO journal (operation_id, evenement, utilisateur)
-                VALUES (?, ?, ?)
-            """, (operation_id, evenement, st.session_state.utilisateur))
+        st.subheader("📎 Pièces jointes")
+        upload = st.file_uploader("Téléverser un fichier", type=["pdf", "jpg", "png"])
+        if upload:
+            data = base64.b64encode(upload.read()).decode()
+            cursor.execute("INSERT INTO pieces_jointes (operation_id, nom, data_base64) VALUES (?, ?, ?)",
+                           (op["id"], upload.name, data))
             conn.commit()
-            st.success("Entrée ajoutée au journal")
-    
-    # Gantt des phases
-    phases_df = pd.read_sql_query("""
-        SELECT phase, date_debut, date_fin, terminee 
-        FROM phases 
-        WHERE operation_id = ?
-        ORDER BY CASE phase
-            WHEN 'Phase de montage' THEN 1
-            WHEN 'Programmation' THEN 2
-            WHEN 'Foncier' THEN 3
-            WHEN 'Études' THEN 4
-            WHEN 'DCE' THEN 5
-            WHEN 'Attribution de marché' THEN 6
-            WHEN 'Chantier' THEN 7
-            WHEN 'Livraison' THEN 8
-            WHEN 'Clôture technique' THEN 9
-            WHEN 'Clôture financière' THEN 10
-        END
-    """, conn, params=(operation_id,))
-    
-    fig = px.timeline.Gantt(phases_df, x_start="date_debut", x_end="date_fin", 
-                           y="phase", title="Planning des Phases")
-    st.plotly_chart(fig, use_container_width=True)
+            st.success("Fichier ajouté")
+        files = get_pieces(op["id"])
+        for _, row in files.iterrows():
+            st.download_button(f"⬇️ {row['nom']}", base64.b64decode(row["data_base64"]), file_name=row["nom"])
 
-def vue_manager():
-    st.header("Vue Manager")
-    
-    # KPIs globaux
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        total_ops = pd.read_sql_query(
-            "SELECT COUNT(*) FROM operations",
-            get_connection()
-        ).iloc[0,0]
-        st.metric("Total Opérations", total_ops)
-    
-    with col2:
-        active_ops = pd.read_sql_query("""
-            SELECT COUNT(*) FROM operations 
-            WHERE statut != '✅ Clôturé'
-        """, get_connection()).iloc[0,0]
-        st.metric("Opérations Actives", active_ops)
-    
-    with col3:
-        avg_avancement = pd.read_sql_query("""
-            SELECT AVG(avancement) * 100 FROM operations
-        """, get_connection()).iloc[0,0]
-        st.metric("Avancement Moyen (%)", f"{avg_avancement:.1f}")
-    
-    # Filtres
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        type_filter = st.selectbox("Type d'opération", ["Tous"] + ["OPP", "VEFA", "AMO", "Mandat"])
-    with col2:
-        statut_filter = st.selectbox("Statut", ["Tous"] + STATUTS)
-    with col3:
-        responsable_filter = st.text_input("Responsable")
-    
-    # Liste des opérations filtrées
-    df = pd.read_sql_query("""
-        SELECT * FROM operations 
-        WHERE (? = 'Tous' OR type_operation = ?)
-        AND (? = 'Tous' OR statut = ?)
-        AND (? = '' OR responsable LIKE ?)
-        ORDER BY date_creation DESC
-    """, get_connection(), params=(
-        type_filter, type_filter,
-        statut_filter, statut_filter,
-        f"%{responsable_filter}%"
-    ))
-    
-    for _, row in df.iterrows():
-        with st.expander(row['nom']):
-            afficher_detail_operation(row['id'])
+        st.subheader("📄 Export Word")
+        def export_word(op):
+            doc = Document()
+            doc.add_heading(op['nom'], 0)
+            doc.add_paragraph(f"Type : {op['type']}")
+            doc.add_paragraph(f"Responsable : {op['responsable']}")
+            doc.add_paragraph(f"Statut : {op['statut']}")
+            doc.add_paragraph("Phases : " + ", ".join(phase_check))
+            doc.add_paragraph(f"Avancement : {avancement} %")
+            doc.add_heading("Journal", level=1)
+            for _, row in get_journal(op["id"]).iterrows():
+                doc.add_paragraph(f"{row['date'][:10]} - {row['auteur']} : {row['action']}")
+            b = BytesIO()
+            doc.save(b)
+            b.seek(0)
+            return b
+        if st.button("📤 Générer rapport Word"):
+            st.download_button("Télécharger", export_word(op), file_name="rapport.docx")
 
-def main():
-    init_database()
-    
-    # Initialisation de l'utilisateur
-    if 'utilisateur' not in st.session_state:
-        st.session_state.utilisateur = st.sidebar.text_input("Nom de l'utilisateur")
-    
-    # Barre de navigation
-    tabs = st.tabs(["Tableau de Bord", "Gestion des Opérations", "Vue Manager"])
-    
-    with tabs[0]:
-        afficher_tableau_bord()
-        
-    with tabs[1]:
-        ajouter_operation()
-        
-    with tabs[2]:
-        vue_manager()
+# --- Vue Manager ---
+elif menu == "Vue Manager":
+    st.title("📊 Vue Manager")
+    df = get_operations()
+    st.metric("Nombre total", len(df))
+    st.metric("En cours", len(df[df["statut"] == "🟢 En cours"]))
+    st.metric("Clôturées", len(df[df["statut"] == "✅ Clôturé"]))
+    st.metric("Bloquées", len(df[df["statut"] == "🔴 Bloqué"]))
+    fig = px.histogram(df, x="statut", color="responsable", title="Statuts par responsable")
+    st.plotly_chart(fig)
 
-if __name__ == "__main__":
-    main()
+# --- Reset DB ---
+elif menu == "🔄 Réinitialiser DB":
+    if st.button("⚠️ Réinitialiser toute la base de données"):
+        cursor.execute("DROP TABLE IF EXISTS operations")
+        cursor.execute("DROP TABLE IF EXISTS journal")
+        cursor.execute("DROP TABLE IF EXISTS pieces_jointes")
+        conn.commit()
+        init_db()
+        st.success("Base réinitialisée")
