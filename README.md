@@ -1,40 +1,26 @@
 # 📊 Application de Suivi des Opérations de Construction
 
-Cette application Streamlit permet de suivre l'avancement d'un portefeuille d'opérations de construction (chantier, VEFA, AMO, etc.) de manière intuitive et professionnelle.
+Cette application permet de suivre l'état d'avancement des opérations de construction (chantier, VEFA, AMO, etc.) depuis la création jusqu’à la clôture.
 
-## 🚀 Fonctionnalités principales
+## Fonctionnalités incluses
 
-- Création et gestion d'opérations
-- Vue détaillée avec journal, pièces jointes et frise des phases
-- Vue manager avec indicateurs globaux et filtres avancés
-- Export PDF / Word
-- Base de données SQLite intégrée
-- Interface responsive et claire
+- ✅ Création d’opérations avec typologie, responsable et statut métier
+- ✅ Journal d’actions daté et consultable
+- ✅ Phases métier sous forme de checklist + calcul d’avancement
+- ✅ Upload de pièces jointes encodées en base64
+- ✅ Génération automatique d’un rapport Word
+- ✅ Vue Manager avec KPIs et graphique
+- ✅ Réinitialisation possible de la base
 
-## 📁 Structure des fichiers
+## Lancement sur Streamlit Cloud
 
-- `app_final_fully_fixed.py` : Fichier principal Streamlit
-- `requirements.txt` : Dépendances nécessaires
-- `operations.db` : Base SQLite créée automatiquement
-
-## ✅ Déploiement sur Streamlit Cloud
-
-1. Créez un dépôt GitHub et uploadez :
-   - `app_final_fully_fixed.py`
+1. Crée un dépôt GitHub avec :
+   - `app.py`
    - `requirements.txt`
-   - (facultatif) `README.md`
-
-2. Allez sur [Streamlit Cloud](https://streamlit.io/cloud) et connectez votre GitHub.
-
-3. Sélectionnez ce dépôt pour créer une nouvelle application.
-
-4. Lancez l'application. La base `operations.db` sera générée automatiquement.
-
-## ⚠️ Conseils
-
-- Si vous modifiez la base de données, vous pouvez réinitialiser les tables via l’application.
-- Utilisez les boutons et filtres pour naviguer efficacement entre les vues.
+   - `README.md` (optionnel)
+2. Connecte ton compte à [Streamlit Cloud](https://streamlit.io/cloud)
+3. Lance ton app → la base `operations.db` est automatiquement créée au premier lancement.
 
 ---
 
-© 2025 - Suivi des Opérations de Construction
+© 2025 - Suivi des Opérations Professionnelles.
